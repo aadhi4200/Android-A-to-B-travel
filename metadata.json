@@ -1,0 +1,6 @@
+{
+  "name": "Drone A → B",
+  "description": "Autonomous drone travel and ground control monitoring system for point-to-point missions with telemetry, SLAM, and obstacle avoidance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

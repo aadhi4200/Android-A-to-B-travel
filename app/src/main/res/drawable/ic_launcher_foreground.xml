@@ -1,0 +1,59 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Drone Center Body -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M50,44 L58,44 L62,54 L58,64 L50,64 L46,54 Z" />
+    <path
+        android:fillColor="#00B4D8"
+        android:pathData="M52,48 L56,48 L58,54 L56,60 L52,60 L50,54 Z" />
+    
+    <!-- Drone Arms -->
+    <path
+        android:fillColor="#90E0EF"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:pathData="M48,46 L34,32 M60,46 L74,32 M48,62 L34,76 M60,62 L74,76" />
+    
+    <!-- Rotors Top Left -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M34,32 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#0B1320"
+        android:pathData="M34,32 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+        
+    <!-- Rotors Top Right -->
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M74,32 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#0B1320"
+        android:pathData="M74,32 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+    <!-- Rotors Bottom Left -->
+    <path
+        android:fillColor="#FFB703"
+        android:pathData="M34,76 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#0B1320"
+        android:pathData="M34,76 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+    <!-- Rotors Bottom Right -->
+    <path
+        android:fillColor="#FFB703"
+        android:pathData="M74,76 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#0B1320"
+        android:pathData="M74,76 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+
+    <!-- Flight Heading Arrow (Center) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,49 L58,56 L54,54 L50,56 Z" />
+</vector>
+

@@ -1,9 +1,15 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,6 +29,8 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.*
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.GeoPoint
@@ -46,50 +54,109 @@ fun TacticalMapCanvas(
   mapType: MapVisualType = MapVisualType.TACTICAL_GRID,
   onMapTap: ((GeoPoint) -> Unit)? = null,
   isSelectingPointA: Boolean = false,
-  isSelectingPointB: Boolean = false
+  isSelectingPointB: Boolean = false,
+  onSelectPointAMode: (() -> Unit)? = null,
+  onSelectPointBMode: (() -> Unit)? = null,
+  cruiseAltitudeMeters: Double = 32.4
 ) {
   var zoomLevel by remember { mutableFloatStateOf(1.0f) }
   var panOffsetX by remember { mutableFloatStateOf(0f) }
   var panOffsetY by remember { mutableFloatStateOf(0f) }
-  var autoFollowDrone by remember { mutableStateOf(true) }
+  var autoFollowDrone by remember { mutableStateOf(false) }
 
   val textMeasurer = rememberTextMeasurer()
 
-  // Base reference coordinate (centered around default Vertiport Alpha)
-  val baseCenterLat = pointA?.latitude ?: 10.123456
-  val baseCenterLon = pointA?.longitude ?: 76.123456
+  // Base reference coordinate (centered around Point A or Point B or default location)
+  val baseCenterLat = pointA?.latitude ?: pointB?.latitude ?: 10.123456
+  val baseCenterLon = pointA?.longitude ?: pointB?.longitude ?: 76.123456
+
+  // Calculate distance between A and B
+  val calculatedDistanceKm = remember(pointA, pointB) {
+    if (pointA != null && pointB != null) {
+      val lat1 = Math.toRadians(pointA.latitude)
+      val lon1 = Math.toRadians(pointA.longitude)
+      val lat2 = Math.toRadians(pointB.latitude)
+      val lon2 = Math.toRadians(pointB.longitude)
+      val dlat = lat2 - lat1
+      val dlon = lon2 - lon1
+      val sinLat = sin(dlat / 2.0)
+      val sinLon = sin(dlon / 2.0)
+      val comp = sinLat * sinLat + cos(lat1) * cos(lat2) * sinLon * sinLon
+      val c = 2.0 * atan2(sqrt(comp), sqrt(1.0 - comp))
+      ((6371.0 * c) * 100).roundToInt() / 100.0
+    } else 0.0
+  }
+
+  val estimatedFlightSeconds = remember(calculatedDistanceKm) {
+    if (calculatedDistanceKm > 0.0) ((calculatedDistanceKm * 1000.0) / 7.8).toInt() + 60 else 0
+  }
+  val estimatedFlightMinutes = estimatedFlightSeconds / 60
+  val estimatedFlightRemainingSec = estimatedFlightSeconds % 60
+  val estimatedBatteryPercent = remember(calculatedDistanceKm) {
+    if (calculatedDistanceKm > 0.0) (calculatedDistanceKm * 7.5).toInt().coerceIn(10, 45) else 0
+  }
+
+  // Function to center and fit route in view
+  fun fitRouteInView(canvasWidth: Float, canvasHeight: Float) {
+    if (pointA != null && pointB != null) {
+      val midLat = (pointA.latitude + pointB.latitude) / 2.0
+      val midLon = (pointA.longitude + pointB.longitude) / 2.0
+
+      val dyMidMeters = (midLat - baseCenterLat) * 111000.0
+      val dxMidMeters = (midLon - baseCenterLon) * (111000.0 * cos(Math.toRadians(baseCenterLat)))
+
+      val distMeters = calculatedDistanceKm * 1000.0
+      val requiredSpan = (distMeters * 1.5).coerceAtLeast(300.0)
+      val targetZoom = ((min(canvasWidth, canvasHeight) * 10.0f) / requiredSpan).toFloat().coerceIn(0.5f, 3.0f)
+
+      zoomLevel = targetZoom
+      val pixelsPerMeter = zoomLevel / 10.0f
+      panOffsetX = -(dxMidMeters * pixelsPerMeter).toFloat()
+      panOffsetY = (dyMidMeters * pixelsPerMeter).toFloat()
+      autoFollowDrone = false
+    } else {
+      panOffsetX = 0f
+      panOffsetY = 0f
+      zoomLevel = 1.0f
+    }
+  }
 
   Box(
     modifier = modifier
       .fillMaxSize()
       .background(
         when (mapType) {
-          MapVisualType.TACTICAL_GRID -> AerospaceBg
-          MapVisualType.SATELLITE -> Color(0xFF0A121A)
-          MapVisualType.DARK_VECTOR -> Color(0xFF05080E)
+          MapVisualType.TACTICAL_GRID -> SpecialistBg
+          MapVisualType.SATELLITE -> Color(0xFF090D14)
+          MapVisualType.DARK_VECTOR -> Color(0xFF05070B)
         }
       )
+      // Multi-touch gestures: Pinch zoom + multi-finger pan
       .pointerInput(Unit) {
-        detectDragGestures { change, dragAmount ->
-          change.consume()
-          panOffsetX += dragAmount.x
-          panOffsetY += dragAmount.y
+        detectTransformGestures(panZoomLock = false) { _, pan, zoom, _ ->
+          zoomLevel = (zoomLevel * zoom).coerceIn(0.4f, 4.5f)
+          panOffsetX += pan.x
+          panOffsetY += pan.y
           autoFollowDrone = false
         }
       }
-      .pointerInput(isSelectingPointA, isSelectingPointB) {
+      // Tap gesture: Place Point A or Point B
+      .pointerInput(isSelectingPointA, isSelectingPointB, zoomLevel, panOffsetX, panOffsetY, autoFollowDrone) {
         detectTapGestures { tapOffset ->
           if (onMapTap != null) {
-            // Convert screen tap offset to approx geo coordinates
-            val cx = size.width / 2f + panOffsetX
-            val cy = size.height / 2f + panOffsetY
+            val cx = size.width / 2f + (if (autoFollowDrone) 0f else panOffsetX)
+            val cy = size.height / 2f + (if (autoFollowDrone) 0f else panOffsetY)
             val metersPerPixel = 10.0 / zoomLevel
             val dxMeters = (tapOffset.x - cx) * metersPerPixel
             val dyMeters = (cy - tapOffset.y) * metersPerPixel
 
             val newLat = baseCenterLat + (dyMeters / 111000.0)
             val newLon = baseCenterLon + (dxMeters / (111000.0 * cos(Math.toRadians(baseCenterLat))))
-            onMapTap(GeoPoint(newLat, newLon, "Map Pin"))
+            val formattedLat = (newLat * 1000000).roundToInt() / 1000000.0
+            val formattedLon = (newLon * 1000000).roundToInt() / 1000000.0
+
+            val waypointLabel = if (isSelectingPointA) "Point A" else if (isSelectingPointB) "Point B" else "Selected Pin"
+            onMapTap(GeoPoint(formattedLat, formattedLon, waypointLabel))
           }
         }
       }
@@ -128,12 +195,12 @@ fun TacticalMapCanvas(
         val centerScreen = geoToScreen(pointA.latitude, pointA.longitude)
         val geofenceRadiusPixels = (2500.0 * (zoomLevel / 10.0f)).toFloat()
         drawCircle(
-          color = Color(0x1500E5FF),
+          color = Color(0x103B82F6),
           radius = geofenceRadiusPixels,
           center = centerScreen
         )
         drawCircle(
-          color = Color(0x6600E5FF),
+          color = Color(0x403B82F6),
           radius = geofenceRadiusPixels,
           center = centerScreen,
           style = Stroke(
@@ -148,26 +215,84 @@ fun TacticalMapCanvas(
         val startOffset = geoToScreen(pointA.latitude, pointA.longitude)
         val endOffset = geoToScreen(pointB.latitude, pointB.longitude)
 
-        // Glow line
+        // Outer ambient glow line
         drawLine(
-          color = CyanGlow,
+          color = PrimaryBlue.copy(alpha = 0.35f),
           start = startOffset,
           end = endOffset,
-          strokeWidth = 8f,
+          strokeWidth = 10f,
           cap = StrokeCap.Round
         )
+
         // Dashed tactical planned route
         drawLine(
-          color = CyanNeon,
+          color = PrimaryBlueLight,
           start = startOffset,
           end = endOffset,
-          strokeWidth = 3f,
-          pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f),
+          strokeWidth = 3.5f,
+          pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 8f), 0f),
           cap = StrokeCap.Round
+        )
+
+        // Directional flight arrows along the trajectory from Point A to Point B
+        val dx = endOffset.x - startOffset.x
+        val dy = endOffset.y - startOffset.y
+        val angleRad = atan2(dy, dx)
+        val angleDeg = Math.toDegrees(angleRad.toDouble()).toFloat()
+
+        listOf(0.30f, 0.50f, 0.70f).forEach { fraction ->
+          val arrowCenter = Offset(
+            startOffset.x + dx * fraction,
+            startOffset.y + dy * fraction
+          )
+          rotate(degrees = angleDeg, pivot = arrowCenter) {
+            val arrowPath = Path().apply {
+              moveTo(arrowCenter.x + 8f, arrowCenter.y)
+              lineTo(arrowCenter.x - 6f, arrowCenter.y - 6f)
+              lineTo(arrowCenter.x - 2f, arrowCenter.y)
+              lineTo(arrowCenter.x - 6f, arrowCenter.y + 6f)
+              close()
+            }
+            drawPath(path = arrowPath, color = PrimaryBlueLight)
+          }
+        }
+
+        // Distance & Bearing Midpoint Tag
+        val midPoint = Offset((startOffset.x + endOffset.x) / 2f, (startOffset.y + endOffset.y) / 2f)
+        val routeBadgeText = "$calculatedDistanceKm km"
+        val badgeMeasure = textMeasurer.measure(
+          AnnotatedString(routeBadgeText),
+          style = TextStyle(
+            color = Slate100,
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold
+          )
+        )
+        val badgeW = badgeMeasure.size.width + 16f
+        val badgeH = badgeMeasure.size.height + 8f
+        val badgeTopLeft = Offset(midPoint.x - badgeW / 2f, midPoint.y - badgeH / 2f - 16f)
+
+        drawRoundRect(
+          color = SpecialistCardBg.copy(alpha = 0.92f),
+          topLeft = badgeTopLeft,
+          size = androidx.compose.ui.geometry.Size(badgeW, badgeH),
+          cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f)
+        )
+        drawRoundRect(
+          color = BorderBlue,
+          topLeft = badgeTopLeft,
+          size = androidx.compose.ui.geometry.Size(badgeW, badgeH),
+          cornerRadius = androidx.compose.ui.geometry.CornerRadius(6f, 6f),
+          style = Stroke(width = 1f)
+        )
+        drawText(
+          badgeMeasure,
+          topLeft = Offset(badgeTopLeft.x + 8f, badgeTopLeft.y + 4f)
         )
       }
 
-      // 4. Draw Flown Breadcrumbs Path
+      // 4. Draw Flown Breadcrumbs Path (if any)
       if (flownPath.size > 1) {
         val path = Path()
         val first = geoToScreen(flownPath.first().latitude, flownPath.first().longitude)
@@ -178,7 +303,7 @@ fun TacticalMapCanvas(
         }
         drawPath(
           path = path,
-          color = StatusSuccess,
+          color = StatusGreenLight,
           style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
       }
@@ -192,15 +317,14 @@ fun TacticalMapCanvas(
           val pt = geoToScreen(avoidancePath[i].latitude, avoidancePath[i].longitude)
           avoidPath.lineTo(pt.x, pt.y)
         }
-        // Glow warning
         drawPath(
           path = avoidPath,
-          color = StatusWarningDim,
+          color = StatusAmberDim,
           style = Stroke(width = 10f, cap = StrokeCap.Round)
         )
         drawPath(
           path = avoidPath,
-          color = StatusWarning,
+          color = StatusAmberLight,
           style = Stroke(
             width = 3.5f,
             cap = StrokeCap.Round,
@@ -211,7 +335,7 @@ fun TacticalMapCanvas(
         // Draw Obstacle Warning Marker icon at mid-point
         if (avoidancePath.size >= 2) {
           val midPt = geoToScreen(avoidancePath[1].latitude, avoidancePath[1].longitude)
-          drawCircle(color = StatusError, radius = 10f, center = midPt)
+          drawCircle(color = StatusRedLight, radius = 10f, center = midPt)
           drawCircle(
             color = Color.White,
             radius = 16f,
@@ -227,9 +351,8 @@ fun TacticalMapCanvas(
         drawWaypointMarker(
           scope = this,
           pos = aPos,
-          label = "POINT A",
-          sublabel = "START / HOME",
-          badgeColor = CyanNeon,
+          label = "POINT A (START)",
+          badgeColor = PrimaryBlueLight,
           textMeasurer = textMeasurer
         )
       }
@@ -240,9 +363,8 @@ fun TacticalMapCanvas(
         drawLandingZoneMarker(
           scope = this,
           pos = bPos,
-          label = "POINT B",
-          sublabel = "DESTINATION",
-          badgeColor = StatusSuccess,
+          label = "POINT B (LANDING)",
+          badgeColor = StatusGreenLight,
           textMeasurer = textMeasurer
         )
       }
@@ -259,65 +381,166 @@ fun TacticalMapCanvas(
       )
     }
 
-    // Selection mode banner
+    // Interactive Mode Header & Floating Tap Indicator (Top Center)
     if (isSelectingPointA || isSelectingPointB) {
       Surface(
         modifier = Modifier
           .align(Alignment.TopCenter)
-          .padding(top = 16.dp),
+          .padding(top = 12.dp)
+          .testTag("banner_map_tap_instruction"),
         shape = RoundedCornerShape(20.dp),
-        color = AerospaceCardBg.copy(alpha = 0.95f),
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, if (isSelectingPointA) CyanNeon else StatusSuccess)
+        color = SpecialistCardBg.copy(alpha = 0.95f),
+        border = BorderStroke(1.5.dp, if (isSelectingPointA) PrimaryBlueLight else StatusGreenLight)
       ) {
         Row(
-          modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+          modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
           Icon(
-            imageVector = Icons.Default.Place,
+            imageVector = if (isSelectingPointA) Icons.Default.Place else Icons.Default.MyLocation,
             contentDescription = null,
-            tint = if (isSelectingPointA) CyanNeon else StatusSuccess,
-            modifier = Modifier.size(18.dp)
+            tint = if (isSelectingPointA) PrimaryBlueLight else StatusGreenLight,
+            modifier = Modifier.size(16.dp)
           )
-          Spacer(modifier = Modifier.width(8.dp))
+          Spacer(modifier = Modifier.width(6.dp))
           Text(
             text = if (isSelectingPointA) "TAP MAP TO SET POINT A" else "TAP MAP TO SET POINT B",
-            color = TextPrimary,
-            style = MaterialTheme.typography.labelMedium
+            color = Slate100,
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 11.sp
           )
         }
       }
     }
 
-    // Floating Map Controls (Zoom +, Zoom -, Center on Drone)
+    // Top-Left Quick Selection Mode Switcher Chips
+    Row(
+      modifier = Modifier
+        .align(Alignment.TopStart)
+        .padding(top = 12.dp, start = 12.dp),
+      horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      if (onSelectPointAMode != null) {
+        Surface(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onSelectPointAMode() }
+            .testTag("btn_map_mode_point_a"),
+          shape = RoundedCornerShape(8.dp),
+          color = if (isSelectingPointA) PrimaryBlue else SpecialistCardBg.copy(alpha = 0.88f),
+          border = BorderStroke(1.dp, if (isSelectingPointA) PrimaryBlueLight else BorderSubtle)
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (isSelectingPointA) Color.White else PrimaryBlueLight)
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+              text = "SET A",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              color = if (isSelectingPointA) Color.White else Slate200,
+              fontSize = 10.sp
+            )
+          }
+        }
+      }
+
+      if (onSelectPointBMode != null) {
+        Surface(
+          modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onSelectPointBMode() }
+            .testTag("btn_map_mode_point_b"),
+          shape = RoundedCornerShape(8.dp),
+          color = if (isSelectingPointB) PrimaryBlue else SpecialistCardBg.copy(alpha = 0.88f),
+          border = BorderStroke(1.dp, if (isSelectingPointB) StatusGreenLight else BorderSubtle)
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(if (isSelectingPointB) Color.White else StatusGreenLight)
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+              text = "SET B",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              color = if (isSelectingPointB) Color.White else Slate200,
+              fontSize = 10.sp
+            )
+          }
+        }
+      }
+    }
+
+    // Floating Map Controls (Zoom +, Zoom -, Fit Route, Center on Drone)
     Column(
       modifier = Modifier
         .align(Alignment.TopEnd)
-        .padding(top = 16.dp, end = 16.dp),
-      verticalArrangement = Arrangement.spacedBy(8.dp)
+        .padding(top = 12.dp, end = 12.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
       FilledIconButton(
-        onClick = { zoomLevel = (zoomLevel * 1.3f).coerceAtMost(4.0f) },
+        onClick = { zoomLevel = (zoomLevel * 1.3f).coerceAtMost(4.5f) },
         colors = IconButtonDefaults.filledIconButtonColors(
-          containerColor = AerospaceCardBg.copy(alpha = 0.9f),
-          contentColor = TextPrimary
+          containerColor = SpecialistCardBg.copy(alpha = 0.92f),
+          contentColor = Slate100
         ),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.size(40.dp).testTag("map_zoom_in")
+        modifier = Modifier
+          .size(36.dp)
+          .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+          .testTag("map_zoom_in")
       ) {
-        Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(20.dp))
+        Icon(Icons.Default.Add, contentDescription = "Zoom In", modifier = Modifier.size(18.dp))
       }
 
       FilledIconButton(
         onClick = { zoomLevel = (zoomLevel / 1.3f).coerceAtLeast(0.4f) },
         colors = IconButtonDefaults.filledIconButtonColors(
-          containerColor = AerospaceCardBg.copy(alpha = 0.9f),
-          contentColor = TextPrimary
+          containerColor = SpecialistCardBg.copy(alpha = 0.92f),
+          contentColor = Slate100
         ),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.size(40.dp).testTag("map_zoom_out")
+        modifier = Modifier
+          .size(36.dp)
+          .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+          .testTag("map_zoom_out")
       ) {
-        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(20.dp))
+        Icon(Icons.Default.Remove, contentDescription = "Zoom Out", modifier = Modifier.size(18.dp))
+      }
+
+      FilledIconButton(
+        onClick = {
+          fitRouteInView(600f, 400f)
+        },
+        colors = IconButtonDefaults.filledIconButtonColors(
+          containerColor = SpecialistCardBg.copy(alpha = 0.92f),
+          contentColor = PrimaryBlueLight
+        ),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+          .size(36.dp)
+          .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+          .testTag("map_fit_route")
+      ) {
+        Icon(Icons.Default.CropFree, contentDescription = "Fit Route", modifier = Modifier.size(18.dp))
       }
 
       FilledIconButton(
@@ -327,13 +550,16 @@ fun TacticalMapCanvas(
           autoFollowDrone = true
         },
         colors = IconButtonDefaults.filledIconButtonColors(
-          containerColor = if (autoFollowDrone) CyanNeon else AerospaceCardBg.copy(alpha = 0.9f),
-          contentColor = if (autoFollowDrone) AerospaceBg else TextPrimary
+          containerColor = if (autoFollowDrone) PrimaryBlue else SpecialistCardBg.copy(alpha = 0.92f),
+          contentColor = if (autoFollowDrone) Color.White else Slate100
         ),
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier.size(40.dp).testTag("map_center_drone")
+        modifier = Modifier
+          .size(36.dp)
+          .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+          .testTag("map_center_drone")
       ) {
-        Icon(Icons.Default.MyLocation, contentDescription = "Center on Drone", modifier = Modifier.size(20.dp))
+        Icon(Icons.Default.MyLocation, contentDescription = "Center on Drone", modifier = Modifier.size(18.dp))
       }
     }
 
@@ -343,8 +569,8 @@ fun TacticalMapCanvas(
         .align(Alignment.BottomStart)
         .padding(start = 12.dp, bottom = 12.dp),
       shape = RoundedCornerShape(6.dp),
-      color = AerospaceBg.copy(alpha = 0.85f),
-      border = androidx.compose.foundation.BorderStroke(1.dp, AerospaceBorder)
+      color = SpecialistBg.copy(alpha = 0.88f),
+      border = BorderStroke(1.dp, BorderSubtle)
     ) {
       Row(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -352,17 +578,81 @@ fun TacticalMapCanvas(
       ) {
         Box(
           modifier = Modifier
-            .width(30.dp)
+            .width(26.dp)
             .height(2.dp)
-            .background(CyanNeon)
+            .background(PrimaryBlueLight)
         )
         Spacer(modifier = Modifier.width(6.dp))
         val scaleMeters = (300 / zoomLevel).toInt()
         Text(
           text = "${scaleMeters}m | GEOFENCE 2.5KM",
           style = MaterialTheme.typography.labelSmall,
-          color = TextSecondary
+          fontFamily = FontFamily.Monospace,
+          fontSize = 10.sp,
+          color = Slate400
         )
+      }
+    }
+
+    // Floating Route Estimations HUD Banner at Bottom Right of Map Canvas
+    if (pointA != null && pointB != null && calculatedDistanceKm > 0) {
+      Surface(
+        modifier = Modifier
+          .align(Alignment.BottomEnd)
+          .padding(end = 12.dp, bottom = 12.dp)
+          .testTag("map_route_hud_pill"),
+        shape = RoundedCornerShape(8.dp),
+        color = SpecialistCardBg.copy(alpha = 0.92f),
+        border = BorderStroke(1.dp, BorderBlue)
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Route, contentDescription = null, tint = PrimaryBlueLight, modifier = Modifier.size(12.dp))
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              "$calculatedDistanceKm km",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              color = PrimaryBlueLight,
+              fontSize = 10.sp
+            )
+          }
+
+          Text("•", color = Slate500, fontSize = 10.sp)
+
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Timer, contentDescription = null, tint = Slate300, modifier = Modifier.size(12.dp))
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              "${estimatedFlightMinutes}m ${estimatedFlightRemainingSec}s",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              color = Slate100,
+              fontSize = 10.sp
+            )
+          }
+
+          Text("•", color = Slate500, fontSize = 10.sp)
+
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.BatteryChargingFull, contentDescription = null, tint = StatusGreenLight, modifier = Modifier.size(12.dp))
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+              "$estimatedBatteryPercent%",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
+              color = StatusGreenLight,
+              fontSize = 10.sp
+            )
+          }
+        }
       }
     }
   }
@@ -407,7 +697,7 @@ private fun DrawScope.drawTacticalGrid(
   for (r in ringSteps) {
     val scaledR = r * zoom
     drawCircle(
-      color = Color(0x0F00E5FF),
+      color = Color(0x0A3B82F6),
       radius = scaledR,
       center = Offset(centerX, centerY),
       style = Stroke(width = 1f)
@@ -433,7 +723,6 @@ private fun drawWaypointMarker(
   scope: DrawScope,
   pos: Offset,
   label: String,
-  sublabel: String,
   badgeColor: Color,
   textMeasurer: TextMeasurer
 ) {
@@ -441,15 +730,37 @@ private fun drawWaypointMarker(
     // Pulse outer halo
     drawCircle(color = badgeColor.copy(alpha = 0.2f), radius = 22f, center = pos)
     drawCircle(color = badgeColor.copy(alpha = 0.6f), radius = 14f, center = pos)
-    drawCircle(color = AerospaceBg, radius = 9f, center = pos)
+    drawCircle(color = SpecialistBg, radius = 9f, center = pos)
     drawCircle(color = badgeColor, radius = 5f, center = pos)
 
     // Tag Card label above
     val labelResult = textMeasurer.measure(
       AnnotatedString(label),
-      style = TextStyle(color = badgeColor, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+      style = TextStyle(
+        color = badgeColor,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold
+      )
     )
-    drawText(labelResult, topLeft = Offset(pos.x - labelResult.size.width / 2f, pos.y - 36f))
+    val boxWidth = labelResult.size.width + 12f
+    val boxHeight = labelResult.size.height + 6f
+    val boxTopLeft = Offset(pos.x - boxWidth / 2f, pos.y - 38f)
+
+    drawRoundRect(
+      color = SpecialistCardBg.copy(alpha = 0.9f),
+      topLeft = boxTopLeft,
+      size = androidx.compose.ui.geometry.Size(boxWidth, boxHeight),
+      cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+    )
+    drawRoundRect(
+      color = badgeColor.copy(alpha = 0.8f),
+      topLeft = boxTopLeft,
+      size = androidx.compose.ui.geometry.Size(boxWidth, boxHeight),
+      cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f),
+      style = Stroke(width = 1f)
+    )
+    drawText(labelResult, topLeft = Offset(pos.x - labelResult.size.width / 2f, pos.y - 35f))
   }
 }
 
@@ -457,7 +768,6 @@ private fun drawLandingZoneMarker(
   scope: DrawScope,
   pos: Offset,
   label: String,
-  sublabel: String,
   badgeColor: Color,
   textMeasurer: TextMeasurer
 ) {
@@ -470,7 +780,7 @@ private fun drawLandingZoneMarker(
       style = Stroke(width = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f))
     )
     drawCircle(color = badgeColor.copy(alpha = 0.4f), radius = 18f, center = pos)
-    drawCircle(color = AerospaceBg, radius = 12f, center = pos)
+    drawCircle(color = SpecialistBg, radius = 12f, center = pos)
     drawCircle(color = badgeColor, radius = 6f, center = pos)
 
     // Target crosshair corners
@@ -481,9 +791,31 @@ private fun drawLandingZoneMarker(
 
     val labelResult = textMeasurer.measure(
       AnnotatedString(label),
-      style = TextStyle(color = badgeColor, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+      style = TextStyle(
+        color = badgeColor,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold
+      )
     )
-    drawText(labelResult, topLeft = Offset(pos.x - labelResult.size.width / 2f, pos.y - 42f))
+    val boxWidth = labelResult.size.width + 12f
+    val boxHeight = labelResult.size.height + 6f
+    val boxTopLeft = Offset(pos.x - boxWidth / 2f, pos.y - 44f)
+
+    drawRoundRect(
+      color = SpecialistCardBg.copy(alpha = 0.9f),
+      topLeft = boxTopLeft,
+      size = androidx.compose.ui.geometry.Size(boxWidth, boxHeight),
+      cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+    )
+    drawRoundRect(
+      color = badgeColor.copy(alpha = 0.8f),
+      topLeft = boxTopLeft,
+      size = androidx.compose.ui.geometry.Size(boxWidth, boxHeight),
+      cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f),
+      style = Stroke(width = 1f)
+    )
+    drawText(labelResult, topLeft = Offset(pos.x - labelResult.size.width / 2f, pos.y - 41f))
   }
 }
 
@@ -508,7 +840,7 @@ private fun drawTacticalDrone(
       drawPath(
         path = conePath,
         brush = Brush.verticalGradient(
-          colors = listOf(CyanNeon.copy(alpha = 0.25f), Color.Transparent),
+          colors = listOf(PrimaryBlue.copy(alpha = 0.25f), Color.Transparent),
           startY = center.y - 75f,
           endY = center.y
         )
@@ -517,14 +849,14 @@ private fun drawTacticalDrone(
       // Drone Quadcopter Body
       // Arms (diagonal X)
       drawLine(
-        color = Color(0xFF94A3B8),
+        color = Color(0xFF64748B),
         start = Offset(center.x - 18f, center.y - 18f),
         end = Offset(center.x + 18f, center.y + 18f),
         strokeWidth = 3f,
         cap = StrokeCap.Round
       )
       drawLine(
-        color = Color(0xFF94A3B8),
+        color = Color(0xFF64748B),
         start = Offset(center.x - 18f, center.y + 18f),
         end = Offset(center.x + 18f, center.y - 18f),
         strokeWidth = 3f,
@@ -533,17 +865,17 @@ private fun drawTacticalDrone(
 
       // 4 Rotors
       val rotorRadius = 7f
-      // Front Left & Right (Cyan)
-      drawCircle(color = CyanNeon, radius = rotorRadius, center = Offset(center.x - 18f, center.y - 18f))
-      drawCircle(color = CyanNeon, radius = rotorRadius, center = Offset(center.x + 18f, center.y - 18f))
+      // Front Left & Right (Blue)
+      drawCircle(color = PrimaryBlueLight, radius = rotorRadius, center = Offset(center.x - 18f, center.y - 18f))
+      drawCircle(color = PrimaryBlueLight, radius = rotorRadius, center = Offset(center.x + 18f, center.y - 18f))
       // Back Left & Right (Amber/Orange)
-      drawCircle(color = StatusWarning, radius = rotorRadius, center = Offset(center.x - 18f, center.y + 18f))
-      drawCircle(color = StatusWarning, radius = rotorRadius, center = Offset(center.x + 18f, center.y + 18f))
+      drawCircle(color = StatusAmberLight, radius = rotorRadius, center = Offset(center.x - 18f, center.y + 18f))
+      drawCircle(color = StatusAmberLight, radius = rotorRadius, center = Offset(center.x + 18f, center.y + 18f))
 
       // Center Fuselage
-      drawCircle(color = AerospaceCardBg, radius = 10f, center = center)
+      drawCircle(color = SpecialistCardBg, radius = 10f, center = center)
       drawCircle(
-        color = if (isArmed) CyanNeon else Color.Gray,
+        color = if (isArmed) PrimaryBlueLight else Color.Gray,
         radius = 10f,
         center = center,
         style = Stroke(width = 2f)
@@ -556,19 +888,25 @@ private fun drawTacticalDrone(
         lineTo(center.x + 4f, center.y - 4f)
         close()
       }
-      drawPath(path = arrowPath, color = if (isArmed) CyanNeon else Color.White)
+      drawPath(path = arrowPath, color = if (isArmed) PrimaryBlueLight else Color.White)
     }
 
     // Altitude Badge non-rotated below drone
     val altText = "${(altitude * 10).roundToInt() / 10.0}m"
     val altMeasure = textMeasurer.measure(
       AnnotatedString(altText),
-      style = TextStyle(color = TextPrimary, fontSize = 9.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+      style = TextStyle(
+        color = Slate100,
+        fontSize = 9.sp,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold
+      )
     )
-    drawRect(
-      color = AerospaceBg.copy(alpha = 0.85f),
+    drawRoundRect(
+      color = SpecialistBg.copy(alpha = 0.88f),
       topLeft = Offset(center.x - (altMeasure.size.width / 2f) - 4f, center.y + 24f),
-      size = androidx.compose.ui.geometry.Size(altMeasure.size.width + 8f, altMeasure.size.height + 4f)
+      size = androidx.compose.ui.geometry.Size(altMeasure.size.width + 8f, altMeasure.size.height + 4f),
+      cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
     )
     drawText(
       altMeasure,

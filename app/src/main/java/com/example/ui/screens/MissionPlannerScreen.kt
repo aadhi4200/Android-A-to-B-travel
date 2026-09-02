@@ -1,11 +1,17 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,6 +48,7 @@ fun MissionPlannerScreen(
   val validationResult by viewModel.validationResult.collectAsState()
   val displayConfig by viewModel.displayConfig.collectAsState()
 
+  var isMapExpanded by remember { mutableStateOf(false) }
   var showPointACoordDialog by remember { mutableStateOf(false) }
   var showPointBCoordDialog by remember { mutableStateOf(false) }
   var showLocationSearchDialog by remember { mutableStateOf(false) }
@@ -97,29 +104,122 @@ fun MissionPlannerScreen(
       }
     }
 
-    // Tactical Map Planner Canvas Preview
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(240.dp)
-        .clip(RoundedCornerShape(14.dp))
-        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-    ) {
-      TacticalMapCanvas(
-        droneLat = telemetry.latitude,
-        droneLon = telemetry.longitude,
-        droneHeading = telemetry.heading,
-        droneAltitude = telemetry.altitude,
-        isArmed = telemetry.armed,
-        pointA = pointA,
-        pointB = pointB,
-        flownPath = emptyList(),
-        avoidancePath = emptyList(),
-        mapType = displayConfig.mapType,
-        onMapTap = { point -> viewModel.handleMapTap(point) },
-        isSelectingPointA = isSelectingPointA,
-        isSelectingPointB = isSelectingPointB
-      )
+    // Tactical Map Planner Canvas Section
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.Map, contentDescription = null, tint = PrimaryBlueLight, modifier = Modifier.size(16.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text(
+            text = "TACTICAL ROUTE MAP",
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            color = Slate200,
+            fontSize = 11.sp,
+            letterSpacing = 0.5.sp
+          )
+        }
+
+        // Map Expansion Toggle Button
+        Surface(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable { isMapExpanded = !isMapExpanded }
+            .testTag("btn_toggle_map_expand"),
+          color = SpecialistSurfaceVariant,
+          border = BorderStroke(1.dp, BorderSubtle)
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(
+              imageVector = if (isMapExpanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+              contentDescription = null,
+              tint = Slate300,
+              modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = if (isMapExpanded) "COLLAPSE" else "EXPAND MAP",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              fontSize = 10.sp,
+              color = Slate300
+            )
+          }
+        }
+      }
+
+      // Interactive Map Container
+      Box(
+        modifier = Modifier
+          .fillMaxWidth()
+          .height(if (isMapExpanded) 380.dp else 260.dp)
+          .animateContentSize()
+          .clip(RoundedCornerShape(14.dp))
+          .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+      ) {
+        TacticalMapCanvas(
+          droneLat = telemetry.latitude,
+          droneLon = telemetry.longitude,
+          droneHeading = telemetry.heading,
+          droneAltitude = telemetry.altitude,
+          isArmed = telemetry.armed,
+          pointA = pointA,
+          pointB = pointB,
+          flownPath = emptyList(),
+          avoidancePath = emptyList(),
+          mapType = displayConfig.mapType,
+          onMapTap = { point -> viewModel.handleMapTap(point) },
+          isSelectingPointA = isSelectingPointA,
+          isSelectingPointB = isSelectingPointB,
+          onSelectPointAMode = { viewModel.toggleMapSelectPointA() },
+          onSelectPointBMode = { viewModel.toggleMapSelectPointB() },
+          cruiseAltitudeMeters = cruiseAlt
+        )
+      }
+
+      // Quick Preset Destination Bar
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "PRESETS:",
+          style = MaterialTheme.typography.labelSmall,
+          fontFamily = FontFamily.Monospace,
+          fontSize = 10.sp,
+          color = Slate500
+        )
+        viewModel.repository.presetLocations.forEach { preset ->
+          val isSelected = pointB.name == preset.name
+          Surface(
+            modifier = Modifier
+              .clip(RoundedCornerShape(6.dp))
+              .clickable { viewModel.setPointB(preset) }
+              .testTag("preset_${preset.name.replace(" ", "_")}"),
+            color = if (isSelected) StatusBlueDim else SpecialistSurfaceVariant,
+            border = BorderStroke(1.dp, if (isSelected) BorderBlue else BorderSubtle)
+          ) {
+            Text(
+              text = preset.name,
+              style = MaterialTheme.typography.labelSmall,
+              color = if (isSelected) PrimaryBlueLight else Slate300,
+              fontSize = 10.sp,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+          }
+        }
+      }
     }
 
     // POINT A & POINT B SELECTORS & ROUTE SUMMARY
@@ -152,7 +252,7 @@ fun MissionPlannerScreen(
               )
               Spacer(modifier = Modifier.width(6.dp))
               Text(
-                "POINT A (START)",
+                "POINT A (START / LAUNCH)",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = PrimaryBlueLight
@@ -191,7 +291,7 @@ fun MissionPlannerScreen(
               testTag = "chip_point_a_drone"
             )
             PlannerOptionChip(
-              label = "Phone Pos",
+              label = "Phone GPS",
               icon = Icons.Default.Smartphone,
               selected = false,
               onClick = {
@@ -219,7 +319,7 @@ fun MissionPlannerScreen(
           }
         }
 
-        // Distance & Arrow Transition
+        // Distance & Quick Swap Transition
         Row(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.Center,
@@ -232,20 +332,24 @@ fun MissionPlannerScreen(
               .background(BorderSubtle)
           )
           Surface(
-            modifier = Modifier.padding(horizontal = 10.dp),
+            modifier = Modifier
+              .padding(horizontal = 8.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .clickable { viewModel.swapPoints() }
+              .testTag("btn_swap_points"),
             shape = RoundedCornerShape(12.dp),
             color = SpecialistSurfaceVariant,
-            border = BorderStroke(1.dp, BorderSubtle)
+            border = BorderStroke(1.dp, BorderBlue)
           ) {
             Row(
-              modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+              modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
               Icon(
-                Icons.Default.ArrowDownward,
-                contentDescription = null,
+                Icons.Default.SwapVert,
+                contentDescription = "Swap Points",
                 tint = PrimaryBlueLight,
-                modifier = Modifier.size(14.dp)
+                modifier = Modifier.size(16.dp)
               )
               Spacer(modifier = Modifier.width(6.dp))
               Text(
@@ -281,7 +385,7 @@ fun MissionPlannerScreen(
               )
               Spacer(modifier = Modifier.width(6.dp))
               Text(
-                "POINT B (DESTINATION)",
+                "POINT B (DESTINATION / LANDING)",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
                 color = StatusGreenLight
@@ -338,12 +442,13 @@ fun MissionPlannerScreen(
       }
     }
 
-    // MISSION PARAMETERS CARD (Distance, Est Time, Cruise Alt, Est Battery)
+    // MISSION ESTIMATIONS CARD (Distance, Est Time, Cruise Alt, Est Battery)
     Surface(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(14.dp))
-        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp)),
+        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+        .testTag("card_mission_estimations"),
       color = SpecialistCardBg
     ) {
       Column(
@@ -352,14 +457,34 @@ fun MissionPlannerScreen(
           .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        Text(
-          "MISSION ESTIMATIONS",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = PrimaryBlueLight,
-          letterSpacing = 1.sp,
-          fontSize = 11.sp
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            "MISSION ESTIMATIONS & TELEMETRY PROFILE",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = PrimaryBlueLight,
+            letterSpacing = 1.sp,
+            fontSize = 11.sp
+          )
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = StatusGreenDim,
+            border = BorderStroke(1.dp, BorderGreen)
+          ) {
+            Text(
+              "GEOFENCE SAFE",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              color = StatusGreenLight,
+              fontSize = 9.sp,
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+        }
 
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -371,7 +496,7 @@ fun MissionPlannerScreen(
           EstimationMetric("Battery Usage", "$estimatedBatteryUsage%", StatusGreenLight)
         }
 
-        Spacer(modifier = Modifier.height(4.dp))
+        HorizontalDivider(color = BorderSubtle, thickness = 1.dp)
 
         // Cruise Altitude Slider
         Column {

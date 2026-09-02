@@ -137,11 +137,23 @@ class DroneViewModel(
     _isSelectingPointAOnMap.value = false
   }
 
+  fun swapPoints() {
+    val currentA = _plannerPointA.value
+    val currentB = _plannerPointB.value
+    _plannerPointA.value = currentB
+    _plannerPointB.value = currentA
+    _validationResult.value = null
+  }
+
   fun handleMapTap(point: GeoPoint) {
     if (_isSelectingPointAOnMap.value) {
       setPointA(point.copy(name = "Custom Point A"))
+      // Automatically advance to Point B selection if desired
     } else if (_isSelectingPointBOnMap.value) {
       setPointB(point.copy(name = "Custom Point B"))
+    } else {
+      // If neither is explicitly toggled, update Point B by default as target destination
+      setPointB(point.copy(name = "Target (${(point.latitude * 10000).roundToInt() / 10000.0}, ${(point.longitude * 10000).roundToInt() / 10000.0})"))
     }
   }
 

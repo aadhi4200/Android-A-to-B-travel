@@ -1,8 +1,10 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -11,9 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +39,18 @@ fun DashboardScreen(
   val connectionConfig by viewModel.connectionConfig.collectAsState()
   val scrollState = rememberScrollState()
 
+  // Pulsing animation for the active connection indicator
+  val infiniteTransition = rememberInfiniteTransition(label = "connectionPulse")
+  val pulseAlpha by infiniteTransition.animateFloat(
+    initialValue = 0.3f,
+    targetValue = 1.0f,
+    animationSpec = infiniteRepeatable(
+      animation = tween(durationMillis = 1000, easing = LinearEasing),
+      repeatMode = RepeatMode.Reverse
+    ),
+    label = "pulseAlpha"
+  )
+
   Column(
     modifier = modifier
       .fillMaxSize()
@@ -47,7 +59,7 @@ fun DashboardScreen(
       .padding(16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
-    // Top Specialist Header
+    // Top Specialist Header: "DRONE A → B" + Connection Indicator
     Surface(
       modifier = Modifier
         .fillMaxWidth()
@@ -64,29 +76,40 @@ fun DashboardScreen(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+              modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(PrimaryBlueLight)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = "TACTICAL GROUND CONTROL",
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.Bold,
+              color = PrimaryBlueLight,
+              fontSize = 9.5.sp,
+              letterSpacing = 1.5.sp
+            )
+          }
+          Spacer(modifier = Modifier.height(3.dp))
           Text(
-            text = "GROUND CONTROL",
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = PrimaryBlueLight,
-            fontSize = 10.sp,
-            letterSpacing = 2.sp
-          )
-          Spacer(modifier = Modifier.height(2.dp))
-          Text(
-            text = "DRONE A → B",
+            text = "Drone A → B",
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             color = Slate100,
-            letterSpacing = (-0.2).sp
+            fontSize = 22.sp,
+            letterSpacing = (-0.3).sp
           )
         }
 
-        // Connection Status Pill
+        // Aerospace Connection Indicator Badge
         Surface(
           shape = RoundedCornerShape(20.dp),
           color = if (telemetry.connected) StatusGreenDim else StatusRedDim,
-          border = BorderStroke(1.dp, if (telemetry.connected) BorderGreen else BorderRed)
+          border = BorderStroke(1.dp, if (telemetry.connected) BorderGreen else BorderRed),
+          modifier = Modifier.testTag("connection_indicator_badge")
         ) {
           Row(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -96,15 +119,19 @@ fun DashboardScreen(
               modifier = Modifier
                 .size(8.dp)
                 .clip(CircleShape)
-                .background(if (telemetry.connected) StatusGreen else StatusRed)
+                .background(
+                  if (telemetry.connected) StatusGreen.copy(alpha = pulseAlpha)
+                  else StatusRed
+                )
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
               text = if (telemetry.connected) "CONNECTED" else "OFFLINE",
               style = MaterialTheme.typography.labelSmall,
-              fontWeight = FontWeight.Medium,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold,
               color = if (telemetry.connected) StatusGreenLight else StatusRedLight,
-              fontSize = 11.sp,
+              fontSize = 10.5.sp,
               letterSpacing = 0.5.sp
             )
           }
@@ -118,7 +145,8 @@ fun DashboardScreen(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(14.dp))
-          .border(1.dp, BlueTintBorder, RoundedCornerShape(14.dp)),
+          .border(1.dp, BlueTintBorder, RoundedCornerShape(14.dp))
+          .testTag("dashboard_active_mission_banner"),
         color = BlueTintBg
       ) {
         Row(
@@ -130,13 +158,14 @@ fun DashboardScreen(
         ) {
           Column {
             Text(
-              "MISSION STATE",
+              "CURRENT MISSION FLIGHT PHASE",
               style = MaterialTheme.typography.labelSmall,
               color = PrimaryBlueLight,
-              fontSize = 10.sp,
+              fontSize = 9.5.sp,
               fontWeight = FontWeight.Bold,
               letterSpacing = 1.sp
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
               missionState.label,
               style = MaterialTheme.typography.titleMedium,
@@ -152,30 +181,56 @@ fun DashboardScreen(
             shape = RoundedCornerShape(10.dp),
             modifier = Modifier.testTag("btn_view_live_flight")
           ) {
-            Text("LIVE HUD", fontWeight = FontWeight.Bold)
+            Icon(Icons.Default.Radar, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("LIVE HUD", fontWeight = FontWeight.Bold, fontSize = 12.sp)
           }
         }
       }
     }
 
-    // Section Title
-    Text(
-      text = "SYSTEM TELEMETRY",
-      style = MaterialTheme.typography.labelSmall,
-      fontWeight = FontWeight.Bold,
-      color = Slate400,
-      letterSpacing = 1.5.sp
-    )
+    // Section Header
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Analytics, contentDescription = null, tint = PrimaryBlueLight, modifier = Modifier.size(15.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "TELEMETRY METRICS",
+          style = MaterialTheme.typography.labelSmall,
+          fontFamily = FontFamily.Monospace,
+          fontWeight = FontWeight.Bold,
+          color = Slate300,
+          letterSpacing = 1.sp,
+          fontSize = 11.sp
+        )
+      }
 
-    // Full Telemetry Cards Grid
-    TelemetryGridSection(telemetry = telemetry)
+      Text(
+        text = "MAVLink v2.0 • 20 Hz",
+        style = MaterialTheme.typography.bodySmall,
+        fontFamily = FontFamily.Monospace,
+        color = Slate500,
+        fontSize = 10.sp
+      )
+    }
+
+    // Grid-based Telemetry Cards for Battery, GPS, Altitude, Speed, Heading, Flight Mode, and Signal
+    TelemetryGridSection(
+      telemetry = telemetry,
+      modifier = Modifier.testTag("section_telemetry_grid")
+    )
 
     // Pre-Flight Readiness & Quick Navigation Actions
     Surface(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(14.dp))
-        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp)),
+        .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+        .testTag("card_subsystems_status"),
       color = SpecialistCardBg
     ) {
       Column(
@@ -184,13 +239,36 @@ fun DashboardScreen(
           .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
-        Text(
-          text = "SPECIALIST SUBSYSTEMS",
-          style = MaterialTheme.typography.labelSmall,
-          fontWeight = FontWeight.Bold,
-          color = PrimaryBlueLight,
-          letterSpacing = 1.sp
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = "AVIONICS & SUBSYSTEMS STATUS",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = PrimaryBlueLight,
+            letterSpacing = 1.sp,
+            fontSize = 10.sp
+          )
+
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = StatusGreenDim,
+            border = BorderStroke(0.5.dp, BorderGreen)
+          ) {
+            Text(
+              "ALL SYSTEMS NOMINAL",
+              style = MaterialTheme.typography.labelSmall,
+              fontFamily = FontFamily.Monospace,
+              color = StatusGreenLight,
+              fontSize = 8.5.sp,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+        }
 
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -199,10 +277,10 @@ fun DashboardScreen(
           SubsystemStatusItem("PX4 Autopilot", "ONLINE", StatusGreenLight)
           SubsystemStatusItem("MAVLink v2.0", "SYNCED", StatusGreenLight)
           SubsystemStatusItem("SLAM Vision", "TRACKING", StatusGreenLight)
-          SubsystemStatusItem("ArUco Target", "READY", PrimaryBlueLight)
+          SubsystemStatusItem("ArUco Pad", "READY", PrimaryBlueLight)
         }
 
-        Spacer(modifier = Modifier.height(2.dp))
+        HorizontalDivider(color = BorderSubtle, thickness = 1.dp)
 
         // Quick Action Buttons
         Row(
@@ -254,7 +332,7 @@ private fun SubsystemStatusItem(
 ) {
   Column(horizontalAlignment = Alignment.Start) {
     Text(name, style = MaterialTheme.typography.bodySmall, color = Slate500, fontSize = 10.sp)
-    Text(status, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color, fontSize = 11.sp)
+    Spacer(modifier = Modifier.height(2.dp))
+    Text(status, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = color, fontSize = 11.sp)
   }
 }
-
